@@ -1,0 +1,199 @@
+<!doctype html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<meta name="theme-color" content="#101827">
+<meta name="description" content="Deteksi indikasi kantuk pengemudi secara lokal di perangkat.">
+<link rel="manifest" href="./manifest.webmanifest">
+<link rel="icon" href="./icon-192.png">
+<title>DrowsyGuard Mobile</title>
+<style>
+:root{color-scheme:dark;font-family:system-ui,-apple-system,Segoe UI,sans-serif}
+*{box-sizing:border-box}body{margin:0;background:#0b1220;color:#eef3ff;padding:16px}
+main{max-width:760px;margin:auto}.head{display:flex;align-items:center;justify-content:space-between;gap:12px}
+h1{font-size:1.35rem;margin:0}.muted{color:#9fb0ca;font-size:.88rem}.panel{background:#141f33;border:1px solid #293952;border-radius:16px;padding:14px;margin:12px 0}
+.video{position:relative;aspect-ratio:4/3;background:#03070d;border-radius:12px;overflow:hidden}
+video,canvas{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;transform:scaleX(-1)}
+#overlay{pointer-events:none}.row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+button{border:0;border-radius:11px;padding:12px 15px;font-size:1rem;font-weight:750;background:#79adff;color:#061326}
+button.alt{background:#2a3b56;color:#eef3ff}button.danger{background:#d94350;color:white}button:disabled{opacity:.45}
+.status{font-size:1.25rem;font-weight:800;margin:5px 0}.good{color:#6ee7a3}.warn{color:#ffd166}.bad{color:#ff737d}
+.metrics{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:9px}
+.metric{background:#0c1729;border-radius:11px;padding:11px}.metric b{display:block;font-size:1.2rem;margin-top:4px}
+input[type=range]{width:100%}label{display:block;margin:12px 0 5px;color:#c5d2e6}
+.alert{display:none;background:#40171d;border:1px solid #b93c49;border-radius:12px;padding:14px;text-align:center;margin-top:12px}
+.alert.on{display:block;animation:pulse 1s infinite alternate}
+@keyframes pulse{from{background:#40171d}to{background:#791e2a}}
+small{display:block;line-height:1.5;color:#9fb0ca;margin-top:10px}
+.pill{border:1px solid #34445e;border-radius:30px;padding:5px 9px;font-size:.75rem;color:#b9c9df}
+</style>
+</head>
+<body>
+<main>
+ <div class="head"><h1>DrowsyGuard Mobile</h1><span class="pill">ON-DEVICE AI</span></div>
+ <p class="muted">Deteksi indikasi kantuk pengemudi • pemrosesan lokal • PWA</p>
+
+ <section class="panel">
+  <div class="video"><video id="video" autoplay playsinline muted></video><canvas id="overlay"></canvas></div>
+  <div style="margin-top:13px">
+   <div class="muted">STATUS PENGEMUDI</div><div id="status" class="status warn">Belum dimulai</div>
+   <div class="row">
+    <button id="start">Aktifkan kamera & sistem</button>
+    <button id="stop" class="alt" disabled>Stop</button>
+    <button id="ack" class="danger" hidden>Matikan alarm</button>
+   </div>
+   <div id="alert" class="alert"><strong>⚠ PERINGATAN KANTUK</strong><div>Berhenti di tempat aman dan istirahat.</div></div>
+   <p id="message" class="muted">Pertama kali harus online untuk mengunduh library, WASM, dan model AI. Setelah tersimpan, deteksi dapat berjalan offline.</p>
+  </div>
+ </section>
+
+ <section class="panel">
+  <div class="metrics">
+   <div class="metric"><span class="muted">EAR (mata)</span><b id="ear">—</b></div>
+   <div class="metric"><span class="muted">MAR (mulut)</span><b id="mar">—</b></div>
+   <div class="metric"><span class="muted">Mata tertutup</span><b id="closed">0.0 s</b></div>
+   <div class="metric"><span class="muted">PERCLOS (60 dtk)</span><b id="perclos">—</b></div>
+   <div class="metric"><span class="muted">Hitungan menguap</span><b id="yawns">0</b></div>
+   <div class="metric"><span class="muted">Status model</span><b id="modelState">Belum dimuat</b></div>
+  </div>
+ </section>
+
+ <section class="panel">
+  <strong>Pengaturan deteksi</strong>
+  <label>Ambang EAR: <b id="earVal">0.22</b></label>
+  <input id="earLimit" type="range" min=".14" max=".30" step=".01" value=".22">
+  <label>Alarm mata tertutup: <b id="closeVal">1.5</b> detik</label>
+  <input id="closeLimit" type="range" min=".8" max="3" step=".1" value="1.5">
+  <small>Nilai awal perlu diuji dan dikalibrasi pada pengemudi, posisi kamera, dan pencahayaan sebenarnya. Menguap saja memicu status waspada, bukan alarm kritis.</small>
+ </section>
+
+ <section class="panel">
+  <strong>Offline & keselamatan</strong>
+  <div class="muted" style="margin-top:7px">Status penyimpanan: <b id="offlineState">Memeriksa…</b></div>
+  <button id="reload" class="alt" hidden>Muat ulang aplikasi</button>
+  <small>Gunakan Chrome Android. Setelah model berhasil dimuat satu kali, tutup dan buka kembali aplikasi dalam mode pesawat untuk menguji offline. Jangan hapus data/cache situs. Alarm dan getaran bergantung pada dukungan serta pengaturan Android; browser tidak dapat memaksa volume perangkat ke maksimum. Pertahankan layar menyala dan aplikasi di depan saat digunakan.</small>
+ </section>
+ <small>Prototipe penelitian, bukan perangkat keselamatan tersertifikasi. Jangan menguji sambil mengemudi. Bila mengantuk, berhenti di lokasi aman dan beristirahat.</small>
+</main>
+<script>
+(async()=>{
+ const $=id=>document.getElementById(id);
+ let reg=null;
+ if('serviceWorker' in navigator){
+  try{
+   reg=await navigator.serviceWorker.register('./sw.js');
+   await navigator.serviceWorker.ready;
+   $('offlineState').textContent='Service worker terpasang';
+   if(!navigator.serviceWorker.controller){
+    $('message').textContent='Komponen offline sedang disiapkan. Tekan Muat ulang aplikasi agar service worker mulai mengelola halaman.';
+    $('reload').hidden=false;
+    $('reload').onclick=()=>location.reload();
+    return;
+   }
+  }catch(e){$('offlineState').textContent='Service worker gagal: '+e.message;}
+ }else{$('offlineState').textContent='Browser tidak mendukung PWA offline';}
+
+ const {FaceLandmarker,FilesetResolver}=await import('https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/vision_bundle.mjs');
+ const video=$('video'),canvas=$('overlay'),ctx=canvas.getContext('2d');
+ let landmarker=null,stream=null,running=false,raf=0,lastT=-1,closedSince=null,mouthSince=null;
+ let closedSec=0,yawns=0,lastYawn=0,alarm=false,osc=null,gain=null,audio=null,vibeTimer=null,wakeLock=null;
+ let eyeSamples=[],lastSample=0;
+ const d=(a,b)=>Math.hypot(a.x-b.x,a.y-b.y);
+ function eyeRatio(p,t1,b1,t2,b2,l,r){return (d(p[t1],p[b1])+d(p[t2],p[b2]))/(2*d(p[l],p[r]));}
+ function mouthRatio(p){return d(p[13],p[14])/d(p[78],p[308]);}
+ function status(t,c){$('status').textContent=t;$('status').className='status '+c;}
+ function sirenStart(){
+  if(alarm)return;alarm=true;$('alert').classList.add('on');$('ack').hidden=false;
+  try{
+   audio ||= new (window.AudioContext||window.webkitAudioContext)();
+   if(audio.state==='suspended')audio.resume();
+   osc=audio.createOscillator();gain=audio.createGain();
+   osc.type='sawtooth';osc.frequency.value=880;gain.gain.value=.72;
+   osc.connect(gain);gain.connect(audio.destination);osc.start();
+   let high=true;const pulse=()=>{if(!alarm||!osc)return;osc.frequency.setTargetAtTime(high?1050:650,audio.currentTime,.035);high=!high;};
+   sirenStart.pulseId=setInterval(pulse,350);
+  }catch(e){$('message').textContent='Audio gagal: '+e.message;}
+  if(navigator.vibrate){navigator.vibrate([700,250,700,250,1100]);vibeTimer=setInterval(()=>navigator.vibrate([700,250,700,250,1100]),3200);}
+ }
+ function sirenStop(){
+  alarm=false;$('alert').classList.remove('on');$('ack').hidden=true;
+  if(osc){try{osc.stop();}catch(e){}osc.disconnect();osc=null;}
+  if(gain){gain.disconnect();gain=null;}
+  if(sirenStart.pulseId)clearInterval(sirenStart.pulseId);
+  if(vibeTimer)clearInterval(vibeTimer);vibeTimer=null;
+  if(navigator.vibrate)navigator.vibrate(0);
+ }
+ $('ack').onclick=()=>{sirenStop();status('Alarm dihentikan — tetap waspada','warn');};
+ $('earLimit').oninput=e=>$('earVal').textContent=Number(e.target.value).toFixed(2);
+ $('closeLimit').oninput=e=>$('closeVal').textContent=Number(e.target.value).toFixed(1);
+
+ async function loadModel(){
+  $('modelState').textContent='Memuat…';
+  const vision=await FilesetResolver.forVisionTasks('https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm');
+  landmarker=await FaceLandmarker.createFromOptions(vision,{
+   baseOptions:{modelAssetPath:'https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task',delegate:'CPU'},
+   runningMode:'VIDEO',numFaces:1
+  });
+  $('modelState').textContent='Siap / tersimpan';
+ }
+ function draw(p){
+  const w=video.videoWidth,h=video.videoHeight;if(canvas.width!==w||canvas.height!==h){canvas.width=w;canvas.height=h;}
+  ctx.clearRect(0,0,w,h);ctx.fillStyle='#4de0a1';
+  [33,160,158,133,153,144,362,385,387,263,373,380,13,14,78,308].forEach(i=>{ctx.beginPath();ctx.arc(p[i].x*w,p[i].y*h,Math.max(2,w*.004),0,7);ctx.fill();});
+ }
+ function loop(){
+  if(!running)return;
+  if(video.readyState>=2&&video.currentTime!==lastT){
+   lastT=video.currentTime;const out=landmarker.detectForVideo(video,performance.now());
+   if(out.faceLandmarks&&out.faceLandmarks.length){
+    const p=out.faceLandmarks[0];draw(p);
+    const ear=(eyeRatio(p,160,144,158,153,33,133)+eyeRatio(p,385,380,387,373,362,263))/2;
+    const mar=mouthRatio(p),now=performance.now(),threshold=Number($('earLimit').value);
+    $('ear').textContent=ear.toFixed(3);$('mar').textContent=mar.toFixed(3);
+    if(ear<threshold){if(closedSince===null)closedSince=now;closedSec=(now-closedSince)/1000;}
+    else{closedSince=null;closedSec=0;}
+    $('closed').textContent=closedSec.toFixed(1)+' s';
+    if(now-lastSample>200){eyeSamples.push({t:now,closed:ear<threshold});lastSample=now;}
+    eyeSamples=eyeSamples.filter(x=>now-x.t<=60000);
+    const per=eyeSamples.length?eyeSamples.filter(x=>x.closed).length/eyeSamples.length:0;
+    $('perclos').textContent=eyeSamples.length>10?(per*100).toFixed(0)+'%':'Mengumpulkan…';
+    if(mar>.62){if(mouthSince===null)mouthSince=now;if(now-mouthSince>1000&&now-lastYawn>3000){yawns++;lastYawn=now;}}
+    else mouthSince=null;
+    $('yawns').textContent=yawns;
+    const eyeAlarm=closedSec>=Number($('closeLimit').value);
+    const perclosAlarm=eyeSamples.length>=120&&per>=.25;
+    const yawn=mouthSince!==null&&now-mouthSince>1800;
+    if(eyeAlarm||perclosAlarm){status('PERINGATAN: INDIKASI KANTUK','bad');sirenStart();}
+    else if(yawn||closedSec>.35){status('WASPADA — pantau pengemudi','warn');}
+    else if(!alarm){status('Pengemudi terpantau','good');}
+    $('message').textContent=alarm?'Alarm aktif. Berhenti di tempat aman untuk beristirahat.':'Wajah terdeteksi. Pemrosesan dilakukan di perangkat.';
+   }else{
+    ctx.clearRect(0,0,canvas.width,canvas.height);status('Wajah tidak terdeteksi','warn');
+    $('message').textContent='Atur posisi HP dan pencahayaan agar wajah terlihat.';
+   }
+  }
+  raf=requestAnimationFrame(loop);
+ }
+ $('start').onclick=async()=>{
+  $('start').disabled=true;
+  try{
+   if(!landmarker)await loadModel();
+   stream=await navigator.mediaDevices.getUserMedia({audio:false,video:{facingMode:'user',width:{ideal:640},height:{ideal:480}}});
+   video.srcObject=stream;await video.play();
+   audio ||= new (window.AudioContext||window.webkitAudioContext)();await audio.resume();
+   if('wakeLock' in navigator){try{wakeLock=await navigator.wakeLock.request('screen');}catch(e){}}
+   running=true;$('stop').disabled=false;status('Kamera aktif','good');loop();
+  }catch(e){
+   $('start').disabled=false;$('message').textContent='Gagal: '+e.message+'. Periksa izin kamera, HTTPS, dan koneksi internet saat unduhan pertama.';
+  }
+ };
+ $('stop').onclick=()=>{
+  running=false;cancelAnimationFrame(raf);sirenStop();
+  if(stream)stream.getTracks().forEach(t=>t.stop());stream=null;video.srcObject=null;
+  if(wakeLock){wakeLock.release();wakeLock=null;}
+  $('start').disabled=false;$('stop').disabled=true;status('Dihentikan','warn');
+ };
+})();
+</script>
+</body></html>
