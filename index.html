@@ -41,7 +41,6 @@ small{display:block;line-height:1.5;color:#9fb0ca;margin-top:10px}
    <div class="row">
     <button id="start">Aktifkan kamera & sistem</button>
     <button id="stop" class="alt" disabled>Stop</button>
-    <button id="ack" class="danger" hidden>Matikan alarm</button>
    </div>
    <div id="alert" class="alert"><strong>⚠ PERINGATAN KANTUK</strong><div>Berhenti di tempat aman dan istirahat.</div></div>
    <p id="message" class="muted">Pertama kali harus online untuk mengunduh library, WASM, dan model AI. Setelah tersimpan, deteksi dapat berjalan offline.</p>
@@ -61,11 +60,11 @@ small{display:block;line-height:1.5;color:#9fb0ca;margin-top:10px}
 
  <section class="panel">
   <strong>Pengaturan deteksi</strong>
-  <label>Ambang EAR: <b id="earVal">0.19</b></label>
-  <input id="earLimit" type="range" min=".12" max=".30" step=".01" value=".19">
-  <label>Alarm mata tertutup: <b id="closeVal">2.0</b> detik</label>
-  <input id="closeLimit" type="range" min="1" max="4" step=".1" value="2.0">
-  <small>Setelan awal dibuat lebih toleran: kedipan normal tidak seharusnya memicu alarm. Sirene berhenti otomatis setelah mata terbuka stabil selama 0,7 detik. PERCLOS dan menguap hanya memberi status waspada, bukan menyalakan sirene.</small>
+  <label>Ambang EAR: <b id="earVal">0.17</b></label>
+  <input id="earLimit" type="range" min=".12" max=".30" step=".01" value=".17">
+  <label>Alarm mata tertutup: <b id="closeVal">3.0</b> detik</label>
+  <input id="closeLimit" type="range" min="1.5" max="5" step=".1" value="3.0">
+  <small>Setelan lebih longgar: alarm hanya dipicu bila mata terdeteksi tertutup terus-menerus selama durasi yang dipilih (awal 3 detik). Alarm dan getaran berhenti otomatis setelah mata terbuka stabil 0,5 detik; tidak ada tombol untuk mematikan alarm secara manual. PERCLOS dan menguap hanya memberi status waspada, bukan sirene.</small>
  </section>
 
  <section class="panel">
@@ -104,7 +103,7 @@ small{display:block;line-height:1.5;color:#9fb0ca;margin-top:10px}
  function mouthRatio(p){return d(p[13],p[14])/d(p[78],p[308]);}
  function status(t,c){$('status').textContent=t;$('status').className='status '+c;}
  function sirenStart(){
-  if(alarm)return;alarm=true;$('alert').classList.add('on');$('ack').hidden=false;
+  if(alarm)return;alarm=true;$('alert').classList.add('on');
   try{
    audio ||= new (window.AudioContext||window.webkitAudioContext)();
    if(audio.state==='suspended')audio.resume();
@@ -117,14 +116,13 @@ small{display:block;line-height:1.5;color:#9fb0ca;margin-top:10px}
   if(navigator.vibrate){navigator.vibrate([700,250,700,250,1100]);vibeTimer=setInterval(()=>navigator.vibrate([700,250,700,250,1100]),3200);}
  }
  function sirenStop(){
-  alarm=false;$('alert').classList.remove('on');$('ack').hidden=true;
+  alarm=false;$('alert').classList.remove('on');
   if(osc){try{osc.stop();}catch(e){}osc.disconnect();osc=null;}
   if(gain){gain.disconnect();gain=null;}
   if(sirenStart.pulseId)clearInterval(sirenStart.pulseId);
   if(vibeTimer)clearInterval(vibeTimer);vibeTimer=null;
   if(navigator.vibrate)navigator.vibrate(0);
  }
- $('ack').onclick=()=>{sirenStop();status('Alarm dihentikan — tetap waspada','warn');};
  $('earLimit').oninput=e=>$('earVal').textContent=Number(e.target.value).toFixed(2);
  $('closeLimit').oninput=e=>$('closeVal').textContent=Number(e.target.value).toFixed(1);
 
@@ -151,8 +149,12 @@ small{display:block;line-height:1.5;color:#9fb0ca;margin-top:10px}
     const ear=(eyeRatio(p,160,144,158,153,33,133)+eyeRatio(p,385,380,387,373,362,263))/2;
     const mar=mouthRatio(p),now=performance.now(),threshold=Number($('earLimit').value);
     $('ear').textContent=ear.toFixed(3);$('mar').textContent=mar.toFixed(3);
-    if(ear<threshold){if(closedSince===null)closedSince=now;closedSec=(now-closedSince)/1000;}
+    if(ear<threshold){if(closedSince===null)closedSince=now;closedSec=(now-closedSince)/1000;openSince=null;}
     else{closedSince=null;closedSec=0;}
+    // Hysteresis prevents noisy EAR values from repeatedly starting/stopping the alarm.
+    // The alarm is fully automatic: stable open eyes stop siren and vibration.
+    if(ear>threshold+0.015){if(openSince===null)openSince=now;if(alarm&&now-openSince>=500){sirenStop();status('Mata terbuka — alarm berhenti otomatis','good');}}
+    else{openSince=null;}
     $('closed').textContent=closedSec.toFixed(1)+' s';
     if(now-lastSample>200){eyeSamples.push({t:now,closed:ear<threshold});lastSample=now;}
     eyeSamples=eyeSamples.filter(x=>now-x.t<=60000);
@@ -162,14 +164,14 @@ small{display:block;line-height:1.5;color:#9fb0ca;margin-top:10px}
     else mouthSince=null;
     $('yawns').textContent=yawns;
     const eyeAlarm=closedSec>=Number($('closeLimit').value);
-    const perclosAlarm=eyeSamples.length>=120&&per>=.25;
+    const perclosWarning=eyeSamples.length>=120&&per>=.25;
     const yawn=mouthSince!==null&&now-mouthSince>1800;
-    if(eyeAlarm||perclosAlarm){status('PERINGATAN: INDIKASI KANTUK','bad');sirenStart();}
-    else if(yawn||closedSec>.35){status('WASPADA — pantau pengemudi','warn');}
+    if(eyeAlarm){status('PERINGATAN: MATA TERTUTUP TERLALU LAMA','bad');sirenStart();}
+    else if(yawn||closedSec>.35||perclosWarning){if(!alarm)status('WASPADA — pantau pengemudi','warn');}
     else if(!alarm){status('Pengemudi terpantau','good');}
     $('message').textContent=alarm?'Alarm aktif. Berhenti di tempat aman untuk beristirahat.':'Wajah terdeteksi. Pemrosesan dilakukan di perangkat.';
    }else{
-    ctx.clearRect(0,0,canvas.width,canvas.height);status('Wajah tidak terdeteksi','warn');
+    ctx.clearRect(0,0,canvas.width,canvas.height);if(alarm)sirenStop();status('Wajah tidak terdeteksi','warn');
     $('message').textContent='Atur posisi HP dan pencahayaan agar wajah terlihat.';
    }
   }
