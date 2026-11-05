@@ -61,11 +61,11 @@ small{display:block;line-height:1.5;color:#9fb0ca;margin-top:10px}
 
  <section class="panel">
   <strong>Pengaturan deteksi</strong>
-  <label>Ambang EAR: <b id="earVal">0.22</b></label>
-  <input id="earLimit" type="range" min=".14" max=".30" step=".01" value=".22">
-  <label>Alarm mata tertutup: <b id="closeVal">1.5</b> detik</label>
-  <input id="closeLimit" type="range" min=".8" max="3" step=".1" value="1.5">
-  <small>Nilai awal perlu diuji dan dikalibrasi pada pengemudi, posisi kamera, dan pencahayaan sebenarnya. Menguap saja memicu status waspada, bukan alarm kritis.</small>
+  <label>Ambang EAR: <b id="earVal">0.19</b></label>
+  <input id="earLimit" type="range" min=".12" max=".30" step=".01" value=".19">
+  <label>Alarm mata tertutup: <b id="closeVal">2.0</b> detik</label>
+  <input id="closeLimit" type="range" min="1" max="4" step=".1" value="2.0">
+  <small>Setelan awal dibuat lebih toleran: kedipan normal tidak seharusnya memicu alarm. Sirene berhenti otomatis setelah mata terbuka stabil selama 0,7 detik. PERCLOS dan menguap hanya memberi status waspada, bukan menyalakan sirene.</small>
  </section>
 
  <section class="panel">
@@ -97,7 +97,7 @@ small{display:block;line-height:1.5;color:#9fb0ca;margin-top:10px}
  const {FaceLandmarker,FilesetResolver}=await import('https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/vision_bundle.mjs');
  const video=$('video'),canvas=$('overlay'),ctx=canvas.getContext('2d');
  let landmarker=null,stream=null,running=false,raf=0,lastT=-1,closedSince=null,mouthSince=null;
- let closedSec=0,yawns=0,lastYawn=0,alarm=false,osc=null,gain=null,audio=null,vibeTimer=null,wakeLock=null;
+ let closedSec=0,yawns=0,lastYawn=0,alarm=false,osc=null,gain=null,audio=null,vibeTimer=null,wakeLock=null,openSince=null;
  let eyeSamples=[],lastSample=0;
  const d=(a,b)=>Math.hypot(a.x-b.x,a.y-b.y);
  function eyeRatio(p,t1,b1,t2,b2,l,r){return (d(p[t1],p[b1])+d(p[t2],p[b2]))/(2*d(p[l],p[r]));}
